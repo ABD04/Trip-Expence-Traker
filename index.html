@@ -38,6 +38,7 @@ tr.tot td{font-weight:700;background:var(--acc2);border-top:2px solid var(--acc)
 .kpi b{display:block;font-size:21px;font-family:"Fraunces",Georgia,serif}.kpi span{color:var(--mut);font-size:13px}
 .neg{color:var(--bad)}.bar{height:8px;background:var(--line);border-radius:6px;overflow:hidden;margin-top:6px}.bar i{display:block;height:100%;background:var(--acc)}
 .lg{display:flex;gap:8px;flex-wrap:wrap;margin:6px 0 10px;font-size:13px}.lg span{padding:2px 10px;border-radius:999px;color:var(--ink)}
+.dn{display:flex;gap:24px;align-items:center;flex-wrap:wrap}.dl{flex:1;min-width:240px;display:grid;gap:10px}.dr{display:flex;justify-content:space-between;gap:8px}.dr span{display:flex;align-items:center}.dr i{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:8px}
 .hid{display:none}.warn{background:var(--loc);padding:10px 14px;border-radius:10px;margin-bottom:12px}
 @media(max-width:600px){.grid2{grid-template-columns:1fr}header h1{font-size:23px}}
 </style></head><body><div class="wrap">
@@ -49,7 +50,7 @@ tr.tot td{font-weight:700;background:var(--acc2);border-top:2px solid var(--acc)
 <div class="grid2"><div><label>Trip name</label><input type="text" id="tn" placeholder="e.g. Varkala weekend with friends"></div>
 <div><label>Destination</label><input type="text" id="td" placeholder="e.g. Varkala, Kerala"></div>
 <div><label>Budget per person (₹)</label><input type="number" id="tb" placeholder="8000" min="0"></div>
-<div><label>Who is going? <small>(names separated by commas)</small></label><input type="text" id="tm" placeholder="p1,p2,p3,p4" ></div></div>
+<div><label>Who is going? <small>(names separated by commas)</small></label><input type="text" id="tm" placeholder="P1,P2,P3,P4"></div></div>
 <label>What will the money go on? <small>(tick all that apply, you can rename or add more later)</small></label>
 <div class="cats" id="cats"></div>
 <p><button class="pri" onclick="build()">Create my expense sheet</button> <small id="err" class="neg"></small></p>
@@ -68,6 +69,7 @@ tr.tot td{font-weight:700;background:var(--acc2);border-top:2px solid var(--acc)
 </div></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script>
 const CATS=["Travel – Going","Travel – Return","Stay","Food","Local Travel","Entry Tickets","Shopping","Other"];
 const STS=["Paid","Advance Paid","Need to Pay","Pay at Location"];
@@ -116,6 +118,14 @@ function addRow(){st.rows.push({cat:"Other",item:"",qty:1,rate:"",adv:"",status:
 function delRow(i){st.rows.splice(i,1);save();drawRows();refresh()}
 function totals(){const T={t:0,adv:0,paid:0,ap:0,pend:0,bal:0,loc:0};
  st.rows.forEach(r=>{const c=calc(r);T.t+=c.t;T.adv+=+r.adv||0;T.paid+=c.paid;T.ap+=c.ap;T.pend+=c.pend;T.bal+=c.bal;T.loc+=c.loc});return T}
+const PAL=["#3b82f6","#0b9a8a","#e0463b","#f5b800","#16a34a","#8b5cf6","#ec4899","#f97316"];
+function chart(){
+ const rs=st.rows.filter(r=>calc(r).t>0),done=rs.filter(r=>r.status=="Paid").length,n=st.trip.members.length;
+ if(!rs.length)return"";
+ if(done<rs.length)return`<div class="card"><h3>Where your money went</h3><p><small>This chart unlocks when every expense is marked Paid. ${done} of ${rs.length} paid so far.</small></p><div class="bar"><i style="width:${done/rs.length*100}%"></i></div></div>`;
+ const cs=[...new Set(rs.map(r=>r.cat||"Other"))].map(c=>({c,v:rs.filter(r=>(r.cat||"Other")==c).reduce((a,r)=>a+calc(r).t,0)})).sort((a,b)=>b.v-a.v),tot=cs.reduce((a,x)=>a+x.v,0),C=2*Math.PI*70;let off=0;
+ const seg=cs.map((x,i)=>{const l=x.v/tot*C,s=`<circle r="70" cx="100" cy="100" fill="none" stroke="${PAL[i%8]}" stroke-width="38" stroke-dasharray="${l} ${C-l}" stroke-dashoffset="${-off}" transform="rotate(-90 100 100)"/>`;off+=l;return s}).join("");
+ return`<div class="card"><h3>Where your money went</h3><div class="dn"><svg viewBox="0 0 200 200" width="230" height="230">${seg}<text x="100" y="96" text-anchor="middle" font-size="11" fill="currentColor" opacity=".6">Total spent</text><text x="100" y="116" text-anchor="middle" font-size="17" font-weight="700" fill="currentColor">${inr(tot)}</text></svg><div class="dl">${cs.map((x,i)=>`<div><div class="dr"><span><i style="background:${PAL[i%8]}"></i>${esc(x.c)}</span><b>${inr(x.v)} · ${(x.v/tot*100).toFixed(1)}%</b></div><div class="bar"><i style="width:${x.v/tot*100}%;background:${PAL[i%8]}"></i></div></div>`).join("")}<small>${inr(tot/n)} per person · ${inr(st.trip.budget-tot/n)} left of each ${inr(st.trip.budget)} budget</small></div></div></div>`}
 function refresh(){if(!st.trip)return;const T=totals();
  document.querySelectorAll("#tb2 tr[data-i]").forEach(tr=>{const c=calc(st.rows[tr.dataset.i]);
   ["t","paid","ap","pend","bal"].forEach(k=>tr.querySelector(`[data-c=${k}]`).textContent=inr(c[k]))});
@@ -130,12 +140,24 @@ function refresh(){if(!st.trip)return;const T=totals();
  cats.map(c=>{let t=0,p=0,b=0;st.rows.filter(r=>(r.cat||"Other")==c).forEach(r=>{const x=calc(r);t+=x.t;p+=x.paid;b+=x.bal});
   const pc=B?Math.min(100,t/B*100):0;return`<tr><td class="l">${esc(c)}</td><td>${inr(t)}</td><td>${inr(t/n)}</td><td>${inr(p)}</td><td>${inr(b)}</td><td style="min-width:120px"><div class="bar"><i style="width:${pc}%"></i></div><small>${pc.toFixed(0)}%</small></td></tr>`}).join("")+
  `<tr class="tot"><td class="l">Total</td><td>${inr(T.t)}</td><td>${inr(T.t/n)}</td><td>${inr(T.paid)}</td><td>${inr(T.bal)}</td><td></td></tr></tbody></table></div></div>`;
- $("sumv").innerHTML=h;
+ $("sumv").innerHTML=h+chart();
  let p=`<div class="card"><h3>Each person (equal split)</h3><div class="sc"><table><thead><tr><th>Name</th><th>Budget</th><th>Expense share</th><th>Paid</th><th>Advance paid</th><th>Advance pending</th><th>Balance to pay</th><th>Pay at location</th><th>Remaining budget</th></tr></thead><tbody>`+
  st.trip.members.map(m=>`<tr><td class="l"><b>${esc(m)}</b></td><td>${inr(st.trip.budget)}</td><td>${inr(T.t/n)}</td><td>${inr(T.paid/n)}</td><td>${inr(T.ap/n)}</td><td>${inr(T.pend/n)}</td><td>${inr(T.bal/n)}</td><td>${inr(T.loc/n)}</td><td class="${rem<0?"neg":""}">${inr(st.trip.budget-T.t/n)}</td></tr>`).join("")+
  `</tbody></table></div></div><div class="card"><h3>Share of each expense</h3><div class="sc"><table><thead><tr><th>Expense</th><th>Total</th>${st.trip.members.map(m=>`<th>${esc(m)}</th>`).join("")}</tr></thead><tbody>`+
  st.rows.map(r=>{const t=calc(r).t;return`<tr><td class="l">${esc(r.item||r.cat)}</td><td>${inr(t)}</td>${st.trip.members.map(()=>`<td>${inr(t/n)}</td>`).join("")}</tr>`}).join("")+`</tbody></table></div></div>`;
  $("perv").innerHTML=p}
+async function addChart(buf,k,pr0){
+ try{const z=await JSZip.loadAsync(buf),last=4+k,R='http://schemas.openxmlformats.org/officeDocument/2006/relationships',H='<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
+  const dp=PAL.concat(PAL).slice(0,k).map((c,i)=>`<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/><c:spPr><a:solidFill><a:srgbClr val="${c.slice(1)}"/></a:solidFill></c:spPr></c:dPt>`).join("");
+  z.file("xl/charts/chart1.xml",`${H}<c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="${R}"><c:chart><c:title><c:tx><c:rich><a:bodyPr/><a:p><a:pPr><a:defRPr sz="1400" b="1"/></a:pPr><a:r><a:rPr lang="en-US" sz="1400" b="1"/><a:t>Where the money went (amount paid by category)</a:t></a:r></a:p></c:rich></c:tx><c:overlay val="0"/></c:title><c:autoTitleDeleted val="0"/><c:plotArea><c:layout/><c:pieChart><c:varyColors val="1"/><c:ser><c:idx val="0"/><c:order val="0"/><c:tx><c:strRef><c:f>'Spending Chart'!$Q$4</c:f></c:strRef></c:tx>${dp}<c:dLbls><c:dLblPos val="outEnd"/><c:showLegendKey val="0"/><c:showVal val="0"/><c:showCatName val="1"/><c:showSerName val="0"/><c:showPercent val="1"/><c:showBubbleSize val="0"/><c:separator>
+</c:separator><c:showLeaderLines val="1"/></c:dLbls><c:cat><c:strRef><c:f>'Spending Chart'!$P$5:$P$${last}</c:f></c:strRef></c:cat><c:val><c:numRef><c:f>'Spending Chart'!$Q$5:$Q$${last}</c:f></c:numRef></c:val></c:ser><c:firstSliceAng val="0"/></c:pieChart></c:plotArea><c:legend><c:legendPos val="b"/><c:overlay val="0"/></c:legend><c:plotVisOnly val="0"/><c:dispBlanksAs val="gap"/></c:chart></c:chartSpace>`);
+  z.file("xl/drawings/drawing1.xml",`${H}<xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><xdr:twoCellAnchor><xdr:from><xdr:col>4</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>3</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from><xdr:to><xdr:col>14</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>28</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:to><xdr:graphicFrame macro=""><xdr:nvGraphicFramePr><xdr:cNvPr id="2" name="Chart 1"/><xdr:cNvGraphicFramePr/></xdr:nvGraphicFramePr><xdr:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/></xdr:xfrm><a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/chart"><c:chart xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" xmlns:r="${R}" r:id="rId1"/></a:graphicData></a:graphic></xdr:graphicFrame><xdr:clientData/></xdr:twoCellAnchor></xdr:wsDr>`);
+  z.file("xl/drawings/_rels/drawing1.xml.rels",`${H}<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="${R}/chart" Target="../charts/chart1.xml"/></Relationships>`);
+  const rp="xl/worksheets/_rels/sheet4.xml.rels",rel=`<Relationship Id="rIdChart1" Type="${R}/drawing" Target="../drawings/drawing1.xml"/>`,ex=z.file(rp);
+  z.file(rp,ex?(await ex.async("string")).replace("</Relationships>",rel+"</Relationships>"):`${H}<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${rel}</Relationships>`);
+  const sp="xl/worksheets/sheet4.xml";z.file(sp,(await z.file(sp).async("string")).replace("</worksheet>",`<drawing xmlns:r="${R}" r:id="rIdChart1"/></worksheet>`));
+  z.file("[Content_Types].xml",(await z.file("[Content_Types].xml").async("string")).replace("</Types>",'<Override PartName="/xl/drawings/drawing1.xml" ContentType="application/vnd.openxmlformats-officedocument.drawing+xml"/><Override PartName="/xl/charts/chart1.xml" ContentType="application/vnd.openxmlformats-officedocument.drawingml.chart+xml"/></Types>'));
+  return await z.generateAsync({type:"arraybuffer"})}catch(e){return buf}}
 async function exportX(){
  const T0=totals(),n=st.trip.members.length,rows=st.rows,cs=[...new Set(rows.map(r=>r.cat||"Other"))];
  const wb=new ExcelJS.Workbook(),S=wb.addWorksheet("Summary",{views:[{showGridLines:false,state:"frozen",ySplit:3}]}),
@@ -181,16 +203,17 @@ async function exportX(){
  [["Total group budget","B5*B6",B],["Total planned expenses",`Expenses!F${T}`,T0.t],["Remaining budget (unspent)","B9-B10",B-T0.t],["Total amount paid so far",`Expenses!J${T}`,T0.paid],["Total advance paid",`Expenses!K${T}`,T0.ap],["Advance still to be paid",`Expenses!L${T}`,T0.pend],["Balance still to pay (all items)",`Expenses!M${T}`,T0.bal],["To pay at location",`Expenses!N${T}`,T0.loc]].forEach(([l,f,v],j)=>{
   put(S,"A"+(9+j),l,{b:j==2});put(S,"B"+(9+j),fx(f,v),{f:INR,b:j==2,fill:j==2?TOT:null})});
  put(S,"A19","PLACE / CATEGORY-WISE BUDGET",{b:1,fill:SEC});
- hdr(S,20,1,["Place / Category","Budget (Total)","Per Person","Paid","Balance to Pay","Pay at Location"]);
+ hdr(S,20,1,["Place / Category","Budget (Total)","Per Person","Paid","Balance to Pay","Pay at Location","% of Total Paid"]);
  const rg=c=>`Expenses!$${c}$${R0}:$${c}$${R1}`,cv=cs.map(c=>{let o={t:0,p:0,b:0,l:0};rows.filter(r=>(r.cat||"Other")==c).forEach(r=>{const x=calc(r);o.t+=x.t;o.p+=x.paid;o.b+=x.bal;o.l+=x.loc});return o});
  cs.forEach((c,j)=>{const r=pr0+j,o=cv[j];put(S,"A"+r,c);
   [["B","F",o.t],["D","J",o.p],["E","M",o.b],["F","N",o.l]].forEach(([col,src,v])=>put(S,col+r,fx(`SUMIF(${rg("B")},$A${r},${rg(src)})`,v),{f:INR}));
-  put(S,"C"+r,fx(`B${r}/$B$6`,o.t/n),{f:INR})});
+  put(S,"C"+r,fx(`B${r}/$B$6`,o.t/n),{f:INR});put(S,"G"+r,fx(`IFERROR(D${r}/$D$${pT},0)`,T0.paid?o.p/T0.paid:0),{f:"0.0%"})});
  const ro=pr0+k;put(S,"A"+ro,"Other / unlisted (new rows)");
  [["B","F",T0.t],["D","J",T0.paid],["E","M",T0.bal],["F","N",T0.loc]].forEach(([col,src,v])=>put(S,col+ro,fx(`Expenses!${src}${T}-SUM(${col}${pr0}:${col}${ro-1})`,0),{f:INR}));
- put(S,"C"+ro,fx(`B${ro}/$B$6`,0),{f:INR});
+ put(S,"C"+ro,fx(`B${ro}/$B$6`,0),{f:INR});put(S,"G"+ro,fx(`IFERROR(D${ro}/$D$${pT},0)`,0),{f:"0.0%"});
  put(S,"A"+pT,"TOTAL",{b:1,fill:TOT});
  [["B",T0.t],["C",T0.t/n],["D",T0.paid],["E",T0.bal],["F",T0.loc]].forEach(([col,v])=>put(S,col+pT,fx(`SUM(${col}${pr0}:${col}${ro})`,v),{b:1,f:INR,fill:TOT}));
+ put(S,"G"+pT,fx(`SUM(G${pr0}:G${ro})`,T0.paid?1:0),{b:1,f:"0.0%",fill:TOT});
  put(S,"A"+pnT,"PER PERSON SUMMARY (equal split)",{b:1,fill:SEC});
  hdr(S,pnT+1,1,["Name","Budget","Total Expense Share","Amount Paid","Advance Paid","Advance Pending","Balance to Pay","Pay at Location","Remaining Budget"]);
  st.trip.members.forEach((m,j)=>{const r=pn0+j;put(S,"A"+r,m,{c:BL});
@@ -215,8 +238,44 @@ async function exportX(){
  [["Budget per person",()=>"Summary!$B$5",st.trip.budget],["Remaining budget",c=>`${c}${T+1}-${c}${T}`,st.trip.budget-T0.t/n],["Amount paid so far",()=>`Expenses!$J$${T}/Summary!$B$6`,T0.paid/n],["   of which advance paid",()=>`Expenses!$K$${T}/Summary!$B$6`,T0.ap/n],["Advance still pending",()=>`Expenses!$L$${T}/Summary!$B$6`,T0.pend/n],["Balance still to pay",()=>`Expenses!$M$${T}/Summary!$B$6`,T0.bal/n],["To pay at location",()=>`Expenses!$N$${T}/Summary!$B$6`,T0.loc/n]].forEach(([l,f,v],j)=>{
   const r=T+1+j;put(P,"A"+r,null);put(P,"B"+r,l,{b:j<2});put(P,"C"+r,null);
   st.trip.members.forEach((m,q)=>{const c=L(4+q);put(P,c+r,fx(f(c),v),{f:INR,b:j==1,fill:j==1?TOT:null})})});
+ const sc0=4+n,GLt=i=>{let s="";while(i>0){const m=(i-1)%26;s=String.fromCharCode(65+m)+s;i=Math.floor((i-1)/26)}return s};
+ P.mergeCells(3,sc0,3,sc0+n-1);put(P,GLt(sc0)+"3","WHO HAS PAID THIS SPLIT? – pick a status for each person and expense",{b:1,fill:SEC});
+ st.trip.members.forEach((m,j)=>{const sl=GLt(sc0+j),pl=GLt(4+j);
+  put(P,sl+"4",fx(`${pl}4&" – Paid?"`,m+" – Paid?"),{b:1,c:"FFFFFFFF",fill:HD,al:{horizontal:"center",vertical:"middle",wrapText:true}});
+  for(let i=R0;i<=R1;i++){const r=rows[i-R0];put(P,sl+i,r?(r.status=="Paid"?"Paid":"Need to Pay"):null,{c:BL,al:{horizontal:"center"}});
+   P.getCell(sl+i).dataValidation={type:"list",allowBlank:true,formulae:['"Paid,Advance Paid,Need to Pay"']}}
+  put(P,sl+T,null,{fill:TOT});P.getColumn(sc0+j).width=17;
+  const rg=`${sl}${R0}:${sl}${R1}`,paidItems=rows.filter(r=>r.status=="Paid"),pc=paidItems.length,tp=paidItems.reduce((a,r)=>a+calc(r).t/n,0);
+  [["Expenses marked Paid",`COUNTIF(${rg},"Paid")`,pc,"0"],["Expenses with advance paid",`COUNTIF(${rg},"Advance Paid")`,0,"0"],["Expenses yet to pay",`COUNTIF(${rg},"Need to Pay")`,rows.length-pc,"0"],
+   ["Share fully paid (₹)",`SUMIF(${rg},"Paid",${pl}${R0}:${pl}${R1})`,tp,INR],["Share still to pay (₹)",`${pl}${T}-${pl}${T+11}`,T0.t/n-tp,INR]].forEach(([lab,f,v,fm],q)=>{
+   const r=T+8+q;if(j==0){put(P,"A"+r,null);put(P,"B"+r,lab,{b:q>=3});put(P,"C"+r,null)}
+   put(P,GLt(4+j)+r,fx(f,v),{f:fm,b:q==4,fill:q==4?TOT:null})})});
+ P.addConditionalFormatting({ref:`${GLt(sc0)}${R0}:${GLt(sc0+n-1)}${R1}`,rules:[["Paid","FFC6EFCE"],["Advance Paid","FFBDD7EE"],["Need to Pay","FFFFF9B0"]].map(([t,c],q)=>({type:"cellIs",operator:"equal",formulae:[`"${t}"`],priority:q+10,style:{fill:{type:"pattern",pattern:"solid",bgColor:{argb:c}}}}))});
+ const w0=T+15,wr0=w0+2,wr1=wr0+n-1,tr=wr1+1,due=Math.round(T0.t/n);
+ "BCDEFGH".split("").forEach(c=>put(P,c+w0,null,{fill:SEC}));
+ put(P,"B"+w0,"WHO HAS PAID? – separate tracker (not linked to any other sheet)",{b:1,fill:SEC});
+ hdr(P,w0+1,2,["Name","Amount Due (₹)","Payment Status","Advance Paid (₹) (only if Advance Paid)","Amount Received","Balance to Pay","Notes"]);P.getRow(w0+1).height=45;
+ st.trip.members.forEach((m,j)=>{const r=wr0+j;put(P,"B"+r,m,{c:BL});put(P,"C"+r,due,{c:BL,f:INR});put(P,"D"+r,"Need to Pay",{c:BL,al:{horizontal:"center"}});put(P,"E"+r,null,{c:BL,f:INR});
+  put(P,"F"+r,fx(`IF(D${r}="Paid",C${r},IF(D${r}="Advance Paid",E${r},0))`,0),{f:INR});put(P,"G"+r,fx(`C${r}-F${r}`,due),{f:INR});put(P,"H"+r,null,{c:BL});
+  P.getCell("D"+r).dataValidation={type:"list",allowBlank:true,formulae:['"Paid,Advance Paid,Need to Pay"']}});
+ put(P,"B"+tr,"TOTAL",{b:1,fill:TOT});put(P,"D"+tr,null,{fill:TOT});put(P,"H"+tr,null,{fill:TOT});
+ [["C",due*n],["E",0],["F",0],["G",due*n]].forEach(([c,v])=>put(P,c+tr,fx(`SUM(${c}${wr0}:${c}${wr1})`,v),{b:1,f:INR,fill:TOT}));
+ [["People fully paid","Paid",0],["People who paid advance only","Advance Paid",0],["People yet to pay","Need to Pay",n]].forEach(([l,k2,v],j)=>{put(P,"B"+(tr+2+j),l,{b:1});put(P,"C"+(tr+2+j),fx(`COUNTIF($D$${wr0}:$D$${wr1},"${k2}")`,v),{f:"0"})});
+ P.addConditionalFormatting({ref:`D${wr0}:D${wr1}`,rules:[["Paid","FFC6EFCE"],["Advance Paid","FFBDD7EE"],["Need to Pay","FFFFF9B0"]].map(([t,c],q)=>({type:"cellIs",operator:"equal",formulae:[`"${t}"`],priority:q+1,style:{fill:{type:"pattern",pattern:"solid",bgColor:{argb:c}}}}))});
  [6,32,13].forEach((w,i)=>P.getColumn(i+1).width=w);for(let q=0;q<n;q++)P.getColumn(4+q).width=15;
- const buf=await wb.xlsx.writeBuffer();
+ 
+ const C=wb.addWorksheet("Spending Chart",{views:[{showGridLines:false}]}),rem=T0.bal;
+ put(C,"A1","Where the money went – "+st.trip.name,{nb:1}).font={name:"Arial",size:16,bold:true,color:{argb:HD}};
+ put(C,"A2","The chart shows amounts marked Paid. Once every expense is Paid, it shows your final spending breakdown.",{i:1,c:"FF595959",nb:1});
+ put(C,"A3",fx('IF(Summary!$B$15=0,"All expenses paid – final spending breakdown","In progress – "&TEXT(Summary!$B$15,"₹#,##0")&" still to pay")',rem==0?"All expenses paid – final spending breakdown":"In progress – "+inr(rem)+" still to pay"),{b:1,nb:1});
+ hdr(C,4,1,["Category","Amount Paid","% of Total Paid"]);
+ cs.forEach((c,j)=>{const r=5+j;put(C,"A"+r,fx(`Summary!A${pr0+j}`,c));put(C,"B"+r,fx(`Summary!D${pr0+j}`,cv[j].p),{f:INR});put(C,"C"+r,fx(`IFERROR(B${r}/$B$${5+k},0)`,T0.paid?cv[j].p/T0.paid:0),{f:"0.0%"})});
+ put(C,"A"+(5+k),"TOTAL",{b:1,fill:TOT});put(C,"B"+(5+k),fx(`Summary!D${pT}`,T0.paid),{b:1,f:INR,fill:TOT});put(C,"C"+(5+k),fx(`SUM(C5:C${4+k})`,T0.paid?1:0),{b:1,f:"0.0%",fill:TOT});
+ put(C,"P4","Chart category",{b:1});put(C,"Q4","Paid",{b:1});
+ cs.forEach((c,j)=>{const r=5+j;put(C,"P"+r,fx(`A${r}`,c));put(C,"Q"+r,fx(`IF(B${r}>0,B${r},NA())`,cv[j].p>0?cv[j].p:{error:"#N/A"}),{f:INR})});
+ C.getColumn(16).hidden=true;C.getColumn(17).hidden=true;
+ C.getColumn(1).width=24;C.getColumn(2).width=16;C.getColumn(3).width=16;
+ const buf=await addChart(await wb.xlsx.writeBuffer(),k,pr0);
  const fn=(st.trip.name||"trip").replace(/[^\w\- ]/g,"")+" Budget.xlsx",blob=new Blob([buf]);
  try{const d=window.claude?await claude.use("downloads"):null;
   if(d)return await d.save({filename:fn,data:blob})}catch(e){}
